@@ -737,7 +737,13 @@ include_dirs:
 	cp -r "$(LIBC_TOP_HALF_MUSL_DIR)"/arch/wasm32/bits/* "$(SYSROOT_INC)/bits"
 
 	# Remove selected header files.
+	echo BEFORE ======================================================
+	find $(SYSROOT_INC)
+	echo BEFORE ======================================================
 	$(RM) $(patsubst %,$(SYSROOT_INC)/%,$(MUSL_OMIT_HEADERS))
+	echo AFTER ======================================================
+	find $(SYSROOT_INC)
+	echo AFTER ======================================================
 ifeq ($(WASI_SNAPSHOT), p2)
 	printf '#ifndef __wasilibc_use_wasip2\n#define __wasilibc_use_wasip2\n#endif\n' \
 		> "$(SYSROOT_INC)/__wasi_snapshot.h"
