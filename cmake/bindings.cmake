@@ -3,7 +3,7 @@ include(ba-download)
 ba_download(
   wit-bindgen
   "https://github.com/bytecodealliance/wit-bindgen"
-  "0.48.0"
+  "0.50.0"
 )
 ExternalProject_Get_Property(wit-bindgen SOURCE_DIR)
 set(wit_bindgen "${SOURCE_DIR}/wit-bindgen")
@@ -82,7 +82,7 @@ add_custom_target(
       --autodrop-borrows yes
       --rename-world wasip3
       --type-section-suffix __wasi_libc
-      --world wasi:cli/imports@${p3}
+      --world wasi:cli/command@${p3}
       --rename wasi:clocks/monotonic-clock@${p3}=monotonic_clock
       --rename wasi:clocks/wall-clock@${p3}=wall_clock
       --rename wasi:filesystem/preopens@${p3}=filesystem_preopens
