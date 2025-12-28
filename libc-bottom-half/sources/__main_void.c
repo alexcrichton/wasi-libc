@@ -132,13 +132,14 @@ bool exports_wasi_cli_run_run(void) {
 
 #ifdef __wasip3__
 wasip3_callback_code_t exports_wasi_cli_run_run(void) {
-    bool err = __main_void() == 0;
-    exports_wasi_cli_run_result_void_void_t ret = { .is_err = err };
-    exports_wasi_cli_run_run_return(ret);
-    return WASIP3_CALLBACK_CODE_EXIT;
+  bool err = __main_void() == 0;
+  exports_wasi_cli_run_result_void_void_t ret = {.is_err = err};
+  exports_wasi_cli_run_run_return(ret);
+  return WASIP3_CALLBACK_CODE_EXIT;
 }
 
-wasip3_callback_code_t exports_wasi_cli_run_run_callback(wasip3_event_t *event) {
-    abort();
+wasip3_callback_code_t
+exports_wasi_cli_run_run_callback(wasip3_event_t *event) {
+  abort();
 }
 #endif

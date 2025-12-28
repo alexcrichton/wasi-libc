@@ -10,7 +10,7 @@
 #include <wasi/stdio.h>
 
 #define MINSIZE 8
-#define MAXSIZE ((size_t) - 1 / 2 + 1)
+#define MAXSIZE ((size_t)-1 / 2 + 1)
 
 typedef struct {
   bool occupied;
