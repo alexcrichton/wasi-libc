@@ -81,3 +81,15 @@ __wasm_longjmp(void *env, int val)
         arg->val = val;
         __builtin_wasm_throw(1, arg); /* 1 == C_LONGJMP */
 }
+
+#if __clang_major__ >= 22
+__asm__(".globl __c_longjmp\n"
+#if defined(__wasm32__)
+        ".tagtype __c_longjmp i32\n"
+#elif defined(__wasm64__)
+        ".tagtype __c_longjmp i64\n"
+#else
+#error "Unsupported Wasm architecture"
+#endif
+        "__c_longjmp:\n");
+#endif
