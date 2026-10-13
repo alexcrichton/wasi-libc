@@ -58,7 +58,9 @@ elseif(NOT ENGINE OR ENGINE STREQUAL "")
   # older version of Wasmtime as the latest releases no longer support
   # wasi-threads.
   set(wasmtime_version v48.0.1)
-  if (TARGET_TRIPLE MATCHES "-threads")
+  if (WEB)
+    set(wasmtime_version dev)
+  elseif (TARGET_TRIPLE MATCHES "-threads")
     set(wasmtime_version v44.0.0)
   endif()
   ba_download(
@@ -135,6 +137,10 @@ function(add_test_executable executable_name src)
     target_link_options(${executable_name} PRIVATE -pthread)
   endif()
 
+  if (WEB)
+    target_link_options(${executable_name} PRIVATE -mexec-model=reactor)
+  endif()
+
   if(arg_SHARED)
     set_pic(${executable_name})
     # Skip wit-component when linking to manually run `wasm-tools component
@@ -191,6 +197,23 @@ function(add_test_executable executable_name src)
     target_link_libraries(${executable_name} PRIVATE
       -Wl,--whole-archive ${lib} -Wl,--no-whole-archive)
   endforeach()
+
+  # To run in the `wasmtime` CLI web targets are composed with an adapter
+  # that implements web APIs in terms of WASI APIs.
+  if (WEB)
+    target_link_libraries(${executable_name} PRIVATE
+      -Wl,--whole-archive web_test_command_bindings -Wl,--no-whole-archive)
+    add_custom_command(
+      TARGET ${executable_name}
+      POST_BUILD
+      COMMAND
+        ${wasm_tools} compose $<TARGET_FILE:${executable_name}>
+          -d ${WEB_ADAPTER} -o $<TARGET_FILE:${executable_name}> --quiet
+    )
+    set_property(TARGET ${executable_name} APPEND PROPERTY
+      LINK_DEPENDS ${WEB_ADAPTER})
+    add_dependencies(${executable_name} web-adapter wasm-tools)
+  endif()
 endfunction()
 
 # Adds a new test to run.
@@ -246,6 +269,9 @@ function(register_test test_name executable_name)
       $<$<BOOL:LTO>:-Wl,-mllvm=-wasm-enable-sjlj>
       $<$<BOOL:LTO>:-Wl,-mllvm=-wasm-use-legacy-eh=false>
     )
+  endif()
+  if (WEB)
+    list(APPEND wasmtime_args --wasm component-model-implements,component-model-accessors)
   endif()
 
   if (arg_FILE)
@@ -392,6 +418,90 @@ function(add_libc_test test_file)
 
   add_test_pair(${test_name} ${test_file} ${ARGN})
 endfunction()
+
+# Generates C bindings with `wit-bindgen` for `world` in `wit` into `out_dir`
+# and creates a static library `name` out of them.
+#
+# Note that `wit` may be a list of paths, see `wit-bindgen c --help`.
+#
+# Optional arguments:
+#
+# * `FLAGS a b c` - additional flags to pass to `wit-bindgen c`
+function(add_wit_bindgen_library name wit world out_dir)
+  cmake_parse_arguments(PARSE_ARGV 4 arg "" "" "FLAGS")
+
+  # Generated files are named after the world, without any package qualifier,
+  # in `snake_case`.
+  string(REGEX REPLACE ".*/" "" file ${world})
+  string(REPLACE "-" "_" file ${file})
+  add_custom_command(
+    OUTPUT
+      ${out_dir}/${file}.c
+      ${out_dir}/${file}.h
+      ${out_dir}/${file}_component_type.o
+    COMMAND
+      ${wit_bindgen} c ${wit} --world ${world} --out-dir ${out_dir} ${arg_FLAGS}
+    DEPENDS wit-bindgen ${wit}
+  )
+  add_library(${name} STATIC EXCLUDE_FROM_ALL
+    ${out_dir}/${file}.c
+    ${out_dir}/${file}_component_type.o)
+  target_include_directories(${name} PUBLIC ${out_dir})
+  target_compile_options(${name} PRIVATE -fPIC)
+endfunction()
+
+# ========= Web adapter =========================================
+#
+# Tests for the webp2 target import `wasm:js` interfaces which are normally
+# provided by a JS host. To run them in Wasmtime instead they're composed with
+# an adapter component, built here, which implements those interfaces with
+# WASIp2. See `web-adapter/p2/adapter.wit` for more information.
+
+if (WEB)
+  set(web_adapter_src "${CMAKE_CURRENT_SOURCE_DIR}/web-adapter/p2")
+  set(web_adapter_dir "${CMAKE_CURRENT_BINARY_DIR}/web-adapter")
+  # The adapter's WIT along with the web and WASI packages that it depends on.
+  # Note that dependencies must come first.
+  set(web_adapter_wit
+    ${CMAKE_SOURCE_DIR}/web/p2/wit/deps/web.wit
+    ${CMAKE_SOURCE_DIR}/wasi/p2/wit
+    ${web_adapter_src}/adapter.wit)
+
+  # A `wasi:cli/run` export for test programs, see the `test-command` world.
+  add_wit_bindgen_library(web_test_command_bindings
+    "${web_adapter_wit}" wasi-libc:web-adapter/test-command ${web_adapter_dir})
+  target_sources(web_test_command_bindings PRIVATE ${web_adapter_src}/run.c)
+  add_dependencies(web_test_command_bindings sysroot)
+
+  # Note that the library itself here is unused, only the generated sources are
+  # used when building the adapter below.
+  add_wit_bindgen_library(web_adapter_bindings
+    "${web_adapter_wit}" wasi-libc:web-adapter/adapter ${web_adapter_dir}
+    FLAGS
+      --rename wasm:js/global=global
+      --rename wasm:js/console=console)
+
+  # The adapter itself. Note that this is a `wasm32-wasip2` program built with
+  # the compiler's own sysroot, not the webp2 libc under test, so the compiler
+  # is invoked directly to avoid all the flags configured above for tests.
+  set(WEB_ADAPTER ${web_adapter_dir}/web-adapter.wasm)
+  add_custom_command(
+    OUTPUT ${WEB_ADAPTER}
+    COMMAND
+      ${CMAKE_C_COMPILER} --target=wasm32-wasip2 -mexec-model=reactor
+        -Wall -Wextra -Werror -g -I${web_adapter_dir}
+        ${web_adapter_src}/adapter.c
+        ${web_adapter_dir}/adapter.c
+        ${web_adapter_dir}/adapter_component_type.o
+        -o ${WEB_ADAPTER}
+    DEPENDS
+      ${web_adapter_src}/adapter.c
+      ${web_adapter_dir}/adapter.c
+      ${web_adapter_dir}/adapter.h
+      ${web_adapter_dir}/adapter_component_type.o
+  )
+  add_custom_target(web-adapter DEPENDS ${WEB_ADAPTER})
+endif()
 
 # ========= libc-test defined tests =============================
 
@@ -692,23 +802,6 @@ endif()
 
 
 # ========= wasi-libc tests for non-main entrypoints =========================
-
-function(add_wit_bindgen_library name wit world out_dir)
-  add_custom_command(
-    OUTPUT
-      ${out_dir}/${world}.c
-      ${out_dir}/${world}.h
-      ${out_dir}/${world}_component_type.o
-    COMMAND
-      ${wit_bindgen} c ${wit} --world ${world} --out-dir ${out_dir}
-    DEPENDS wit-bindgen ${wit}
-  )
-  add_library(${name} STATIC EXCLUDE_FROM_ALL
-    ${out_dir}/${world}.c
-    ${out_dir}/${world}_component_type.o)
-  target_include_directories(${name} PUBLIC ${out_dir})
-  target_compile_options(${name} PRIVATE -fPIC)
-endfunction()
 
 add_wit_bindgen_library(
   entrypoint_bindings
